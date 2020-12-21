@@ -1,0 +1,548 @@
+---
+title: "Retail Data Assignment"
+author: "Appanna"
+date: "11/28/2020"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results = "markup")
+```
+
+## Introduction
+We have received a dataset from our customer containing the retail data for 45 stores of his company. Using the columns in the dataset, our goal is to explain the target variable 'Sales'. In the course of our analysis, it is useful to first understand the data better. Let us start by describing the columns of the data given:
+
+* Information shared by client about data:
+  - Store: the ID of the store.
+  - Data: the weekly balance sheet date.
+  - Holiday: a binary variable informing if the considered week is Holyday or not. Type: the type of the store.
+  - Size: the size of the store.
+  - Dept: the department number of the store.
+  - Sales: the volume of sales for the corresponding week.
+  - Temperature: the average temperature in the region for the corresponding week.
+  - Fuel_Price: the price of the fuel in the region for the corresponding week.
+  - Promotion: price reduction for the corresponding store and week. The are 5 promotion categories. 
+  - CPI: the consumer price index of the corresponding region and week.
+  - Unemployment: the unemployment rate in the region for the corresponding week.
+
+## Body
+* First we will import the data into RStudio and explore the data for a meta-analysis.
+* Next we will plot some visualizations to get an intuitive feel for the dataset.
+* After this, we can plot some visualizations to give us the behavior of the Sales column.
+* Finally we can fit the data into a linear model and check various combinations to identify to the best extent that the 'Sales' column can be explained.
+
+### Data Exploration
+* Import into RStudio and view the data.
+```{r}
+retail_data<- read.csv('retail_data.csv')
+head(retail_data,2) 
+```
+* Just by looking at the above table, we can infer the following:
+  - Only the 'Dept' and 'Sales' column have unique elements in each row. This means the Sales volume value refers to each unique 'Dept'. The 'X' column likely refers to row number which is insignificant as a feature for analysis.
+  - The 'Promotion' columns have missing values.
+  - All the other columns have the same values in both rows. This implies that they remain common across some grouping of the elements.
+
+* Let us import the libraries that we might use:
+```{r echo=T, results='hide', warning=FALSE, message=FALSE}
+library(tidyverse) #bundle of packages for data grouping, cleaning and visualizing
+library(reshape2) #if we choose to 'melt' the data for different plotting options.
+library(Amelia) #to check the missing values.
+library(naniar) #to check the missing values.
+library(ggplot2) #for beautiful visualizations.
+library(GGally) #for a nice correlation plot with multiple columns.
+library(lubridate) #to load the 'Date' column into a format for easy manipulation.
+```
+
+* How many rows and columns does the dataset contain:
+```{r, echo=TRUE}
+dim(retail_data)
+```
+Dataset contains 421.570 rows and 17 columns.
+
+* Numeric summary of the data:
+  - We can notice that the 'Dept' and 'Store' have been considered as continuous variables. For the plots and analysis to work well, we can convert these into factors.
+```{r, echo=TRUE}
+summary(retail_data)
+```
+
+* Check for missing values:
+```{r}
+missmap(retail_data)
+```
+```{r}
+gg_miss_var(retail_data)
+```
+```{r}
+t(lapply(retail_data, function(x) sum((is.na(x))))) #transpose the output with t()
+```
+We can see that only the 'Promotion' columns have missing values. 
+
+* What defines the uniqueness of each column in the dataset:
+  - First we can check what unique combination of columns results in the total rows of 421570.
+  - It appears that the rows are unique by Store, Date and Dept.
+  - This means that 'Sales' is the value for sales volume of a 'Dept' in a 'Store' on a              particular 'Date'. Each date refers to a week of sales. 
+  - 1 'Date' has many 'Stores'. Each 'Store' has many 'Depts'. Each 'Dept' represents a row in the table with 'Sales' corresponding to that 'Store' and 'Date'. 
+  - A particular 'Store' has only 1 value of 'Temperature','Fuel_Price','CPI','Unemployment' on a particular 'Date'. All 'Depts' in this 'Date', 'Store' combination have same values for these fields.
+  - Many 'Stores' are affected by same 'Temp'/'Fuel_Price'/'CPI'/'Unemployement' on the same 'Date'. This could be because the stores are close by to each other.
+```{r, echo=F, include=FALSE}
+dim(unique(retail_data[c("Store","Date", "Dept")]))
+```
+
+
+### Intuitive Visualizations
+* These visualizations will mainly describe representation of different columns based on the count of rows in the dataset. This can give us an intuitive feel for the distibutions within the dataset.
+
+* Proportion of sales data by Type:
+  - There are 3 Types into which the stores are categorized.
+  - As we can see the Type A represents most of the dataset followed closely by Type B.
+  - Type C has much lesser representation.
+```{r}
+retail_data %>% ggplot(aes(Type)) + geom_bar() + 
+  ggtitle('Proportion of sales by Type')
+```
+  - Number of stores within each 'Type'.
+```{r,warning=FALSE, message=FALSE }
+a<-retail_data %>% group_by(Type) %>% summarise(nStores = n_distinct(Store))
+a
+```
+* Store column
+  - The Store number ranges from 1 to 45 and the total number of stores are:
+```{r}
+sum(a$nStores)
+```
+
+* Dept column
+  - 'Dept' numbers range from 1 to 99(inclusive) as observed in the 'summary' table and the number of unique 'Dept' are:
+```{r}
+nDept=n_distinct(retail_data$Dept)
+nDept
+```
+```{r, include=FALSE}
+retail_data %>% group_by(Store,Type) %>% summarise(nDeps = n_distinct(Dept)) 
+```
+  
+  - There are between 60 to 80 departments per store.
+  - No store has all 81 departments.
+  - Most of the stores have more than 70 departments
+  - If there are less than 70 Depts then it is likely to be a Type C store.
+```{r, warning=FALSE, message=FALSE}
+retail_data %>% group_by(Store,Type) %>% summarise(nDeps = n_distinct(Dept)) %>% ggplot(aes(Store, nDeps, fill = Type)) +
+  geom_bar(stat = 'identity', position="dodge") + ggtitle('Count of unique Depts by Store') 
+```
+
+* Histogram of 'Store' 
+  - There seems to be a correlation between number of departments in a store and count of sales. This is because if there are less 'Depts' then there are fewer rows of data under a 'Store'.
+```{r}
+retail_data %>% ggplot(aes(Store, fill = Type)) +
+  geom_histogram(binwidth = 0.5, colour = 'black') +
+  ggtitle('Count of Sales by Store number') +
+  xlab('Store number') + ylab('Count of total Sales')
+```
+
+* Histogram of 'Dept'
+```{r}
+retail_data%>%ggplot(aes(Dept, fill = Type)) +
+  geom_histogram(binwidth = 1, colour = 'black') +
+  ggtitle('Count of Sales by Dept number') +
+  xlab('Dept number') + ylab('Count of Sales data')
+```
+
+* Number of unique Dates is:
+```{r,results='markup'}
+n_distinct(retail_data$Date)
+```
+
+* Mean number of Dates of Sale for which there is availability of sales data for different stores:
+  - A Dept appears for a date only in there is Sales available at that 'Store' on that 'Date'.
+  - Most of the Depts have stores on all 143 dates but some Depts of a store may have had sales on only a few days. This brings down the average 'Dates' of Sale for a 'Store'.
+  - As we can see in the plot below, most 'Stores' have a mean number of around 125 Dates of sale.
+```{r, warning=FALSE, message=FALSE}
+retail_data%>%group_by(Store,Dept)%>%summarise(nSales=n_distinct(Sales))%>%group_by(Store)%>%summarise(mean_sales=mean(nSales))%>%ggplot(aes(Store, mean_sales,)) +
+  geom_bar(stat = 'identity', position="dodge") + ggtitle('Mean Dates of sale')
+```
+
+* Number of unique Stores for each Dept
+  - Most of the departments appear at least on 1 date in all 45 stores.
+  - In the number range of 1 to 100 for Depts, some numbers do not represent any Dept.
+```{r, include=FALSE}
+retail_data %>% group_by(Dept) %>% summarise(nStore = n_distinct(Store))
+```
+
+```{r, warning=FALSE, message=FALSE}
+retail_data %>% group_by(Dept) %>% summarise(nStore = n_distinct(Store)) %>% ggplot(aes(Dept, nStore)) +
+  geom_bar(stat = 'identity', position="dodge",binwidth = 0.5, colour = 'black')+ggtitle('Unique Stores of each Dept')
+```
+
+```{r, include=FALSE}
+retail_data$Date<-dmy(retail_data$Date)
+class(retail_data$Date)
+```
+
+```{r, include=FALSE}
+retail_data<-retail_data%>%mutate('Year' =year(retail_data$Date),'Month'=month(retail_data$Date),'Day'= day(retail_data$Date) )
+head(retail_data)
+```
+```{r}
+retail_data$Store<-factor(retail_data$Store)
+retail_data$Year<-factor(retail_data$Year)
+retail_data$Month<-factor(retail_data$Month)
+retail_data$Day<-factor(retail_data$Day)
+```
+
+### Patterns in Sales volume
+* Max Sales on a day by Store
+  - The different bars for each Store (which are stacked behind each other) refer to the         different days.
+  - We can observe that the top performing stores, are performing well for most days. This fairly uniform pattern of performance suggests that this might be a good variable for our regression model.
+  - The bar chart is ordered by cumulative maximum sales per location(all days)
+  - The top 6 Stores are: 20,4,14,13,2 and 10. After this there is a dip in performance by the other Stores.
+```{r, warning=FALSE, message=FALSE}
+a<-retail_data%>%group_by(Date,Store)%>%summarise(s_Sales=sum(Sales))
+a%>%ggplot(aes(x=reorder(Store,-s_Sales),s_Sales,alpha=0.4))+geom_bar(stat = 'identity',position='dodge',binwidth = 0.9, colour = 'black')+ggtitle('Cumulative maximum Sales of a Store each day') + xlab('Store') + ylab('Total Sales')
+```
+
+* Max Sales by Dept
+  - The different bars for each Dept (which are stacked behind each other) refer to the         different days.
+  - Observe that even for the abnormal peaks, there are not many 'Dates' (indicated by transparency of the bar segments). From a total of 145 Dates, only few of these are abnormal.
+  - We can see that some 'Depts' have a much higher volume of Sales on some days. These non uniform spikes indicate that this might not be a good variable for our regression model.
+```{r, warning=FALSE, message=FALSE}
+a<-retail_data%>%group_by(Date,Dept)%>%summarise(s_Sales=sum(Sales))
+a%>%ggplot(aes(x=reorder(Dept,-s_Sales),s_Sales,alpha=0.4))+geom_bar(stat = 'identity',position='dodge',binwidth = 0.9, colour = 'black')+ggtitle('Cumulative maximum Sales of a Dept each day') + xlab('Dept') + ylab('Total Sales')
+```
+
+* Top 10 Depts for maximum overall sales:
+  - These correspond to the 10 Depts representing a bar from the left of the above plot. 
+```{r, warning=FALSE, message=FALSE}
+retail_data%>%group_by(Dept)%>%summarise(s_Sales=sum(Sales))%>%arrange(desc(s_Sales))%>%head(10)
+```
+
+* Top 10 Depts which have the highest Sales for a day: 
+  - Each bar in the previous graph represents the total sales of a particular Dept across all Stores for a particular Date. So there are as many bar segments as there are Dates for that Dept.
+  - The table below corresponds to the Depts creating the 10 highest spikes in the previous chart which is making the distribution abnormal:
+```{r,warning=FALSE, message=FALSE}
+retail_data%>%group_by(Date,Dept)%>%summarise(s_Sales=sum(Sales))%>%arrange(desc(s_Sales))%>%group_by(Dept) %>%filter(row_number()==1)%>%head(10) #display only max of a Dept
+```
+
+
+* Max Sales by Date
+  - It appears that the top 10 Dates are higher than the remaining Dates which are around the same volume.
+```{r, warning=FALSE, message=FALSE}
+retail_data %>%group_by(Date)%>%summarise(D_Sales=sum(Sales))%>% ggplot(aes(x=reorder(Date,-D_Sales),D_Sales,alpha=0.9))+geom_bar(stat = 'identity',position='dodge',binwidth = 0.9, colour = 'black')+ggtitle('Maximum Sales per Date') + xlab('Date') + ylab('Total Sales')
+```
+
+* Top 10 days of Sales
+  - We notice that December is the most common month in the top 10 Dates with 6 days.
+  - This is followed by the month of November with 2 days.
+  - Lastly we have a single date each in April and July with large sales volume.
+```{r, echo=FALSE, results='markup', warning=FALSE, message=FALSE}
+retail_data %>%group_by(Year,Month,Day)%>%summarise(D_Sales=sum(Sales))%>%ungroup()%>%slice_max(order_by = D_Sales, n = 10) #Use ungroup() to make the slice_max work
+```
+* Top 10 peak days of Sales by Store:
+  - We can see that Dec 23rd and 24th cause the highest sales across different Stores.
+```{r, warning=FALSE, message=FALSE}
+retail_data %>%group_by(Year,Month,Day,Store)%>%summarise(D_Sales=sum(Sales))%>%ungroup()%>%slice_max(order_by = D_Sales, n = 10)
+```
+
+* Promotions by Date and Dept:
+  - From the dataset we know that promotions apply to all Depts of a Store on a particular day.
+  - Total_promotions is the sum of all the different types of promotions (Promotion1, Promotion2 etc).
+  - We can see that there is a slight positive trend between total Sales of a Store on a Date and Total_promotions.
+  - However, the highest sales from a Store on a given Date still occurs on a day with less Total_promotions.
+```{r, warning=FALSE, message=FALSE }
+promcols=c('Promotion1','Promotion2','Promotion3','Promotion4','Promotion5')
+retail_data$Total_Prom<-rowSums(retail_data[,promcols])
+retail_data%>%group_by(Date,Store,Total_Prom)%>%summarise(D_Sales=sum(Sales),)%>%ggplot(aes(Total_Prom,D_Sales)) +
+  geom_point() + geom_smooth(method = 'lm') +
+  ggtitle('Promotions vs Total Sales  ') 
+```
+
+* Top 10 peak days of Sales by Dept and Store:
+  - Store number 10 has 4 days of the highest volume of sales. Store 35 has 2 days and Stores 14,20,27, and 22 have 1 day each. 
+  - We can see that for most Stores, Dept 72 accounts for the maximum volume of Sales on a given day.
+  - There are 3 main days where this happens: Nov 25th and 26th; Dec 24th
+```{r, warning=FALSE, message=FALSE}
+retail_data %>%group_by(Year,Month,Day,Store,Dept)%>%summarise(D_Sales=sum(Sales))%>%ungroup()%>%slice_max(order_by = D_Sales, n = 10) 
+```
+
+
+
+* Total Sales by Month
+  - There are 3 years of data starting from Feb 2010 to Oct 2012.
+  - We can see that December has the highest sales for any month.
+  - There appears to be 4 major spikes in the Sales for any year:
+    - 2010->Apr,July,Oct,Dec
+    - 2011->Apr,July,Sept,Dec
+    - 2012->Mar,June,Aug
+  - These spikes seem to correspond to the extra date available for that month. Remember that 
+    each date mostly refers to the week of sales. It may be the case that, based on which day of 
+    week is considered for publishing the data for that week, some months may have 5 data points 
+    some may have 4.
+```{r, warning=FALSE, message=FALSE}
+retail_data %>%group_by(Year,Month)%>%summarise(Total_Sales=sum(Sales))%>%ggplot(aes(Month, Total_Sales, fill=Year)) +geom_bar(stat = 'identity',position='dodge',binwidth = 0.9, colour = 'black')
+```
+
+* Check the number of Days per month in the dataframe
+  - There are 5 days of data for the months corresponding to the Total Sales per month peaks. 
+  - On all other months only 4 days of data are available.These days correspond to a week of         data.
+```{r, warning=FALSE, message=FALSE}
+retail_data%>%group_by(Year,Month)%>%summarise(nDays=n_distinct(Day))%>%ggplot(aes(Month, nDays, fill=Year)) +geom_bar(stat = 'identity',position='dodge',binwidth = 0.9, colour = 'black')
+```
+
+
+
+* Total Sales per day distribution as a box plot:
+  - December 2010 has a day with the largest volume of sales.
+  - The top outliers are explained by top 10 days list mentioned before.
+```{r, warning=FALSE, message=FALSE}
+retail_data %>%group_by(Year,Month,Day)%>%summarise(T_Sales=sum(Sales))%>%ggplot(aes(Month, T_Sales, fill=Year)) + geom_boxplot()+ggtitle('Boxplot of days of Sales per month')
+```
+
+
+* Deep dive on what is causing the spike in Dec:
+  - Are specific Stores causing the outliers for Dec?
+  - Check top 5 stores.
+  - There is no significant spike in any 1 Store.
+```{r,warning=FALSE, message=FALSE}
+
+retail_data %>%filter(Month==c(12))%>%group_by(Year,Month,Store)%>%summarise(M_Sales=sum(Sales))%>%slice_max(order_by = M_Sales, n = 5)%>%ggplot(aes(x=reorder(Store,-M_Sales),y=M_Sales, fill=Month))+geom_bar(stat = 'identity',position='dodge',binwidth = 0.9, colour = 'black')+ facet_grid(.~ Year) +
+  theme(strip.text.x = element_text(size = 8, angle = 90))+ggtitle('Store vs Sales') + xlab('Store') + ylab('Monthly Sales')
+
+```
+
+* As we can see below, there is a clear spike on 24th 2010 and 23rd 2011 in the month of December. And we can conclude that this was not due to a spike in any 1 Store in particular.
+
+```{r, warning=FALSE, message=FALSE}
+retail_data %>%filter(Month==c(12))%>%group_by(Year,Month,Day)%>%summarise(D_Sales=sum(Sales))%>%slice_max(order_by = D_Sales, n = 10)%>%ggplot(aes(x=reorder(Day,-D_Sales),y=D_Sales, fill=Month))+geom_bar(stat = 'identity',position='dodge',binwidth = 0.9, colour = 'black')+ facet_grid(.~ Year) +
+  theme(strip.text.x = element_text(size = 8, angle = 90))+ggtitle('Day vs Sales') + xlab('Day') + ylab('Monthly Sales')
+```
+
+```{r, include=FALSE}
+retail_data %>%filter(Month==c(11))%>%group_by(Year,Month,Day)%>%summarise(D_Sales=sum(Sales))%>%slice_max(order_by = D_Sales, n = 5)%>%ggplot(aes(x=reorder(Day,-D_Sales),y=D_Sales, fill=Month))+geom_bar(stat = 'identity',position='dodge',binwidth = 0.9, colour = 'black')+ facet_grid(.~ Year) +
+  theme(strip.text.x = element_text(size = 8, angle = 90))
+```
+
+```{r, include=FALSE}
+retail_data %>%filter(Month==c(10))%>%group_by(Year,Month,Store)%>%summarise(M_Sales=sum(Sales))%>%slice_max(order_by = M_Sales, n = 5)%>%ggplot(aes(x=reorder(Store,-M_Sales),y=M_Sales, fill=Month))+geom_bar(stat = 'identity',position='identity',binwidth = 0.2, colour = 'black',alpha=0.8)+ facet_grid(.~ Year) +
+  theme(strip.text.x = element_text(size = 8, angle = 90))
+```
+
+### Correlation and linear regression
+
+#### Correlation
+* Approach:
+  - We need to explain 'Sales'. Each line item of the dataset is for a certain 'Dept' which is part of a particular 'Store' on a particular 'Date'. 
+  - Let us define 'Continuous_variables' as those which vary continuously: Temp, Fuel_price, CPI, Unemployment, Promotions. 
+  - Let us define the other columns as 'Categorical_variables' such as 'Store', 'Holiday', 'Month' and 'Type', which behave more as categories or factors.
+  - Lastly let us look at 'Promotions' separately.
+```{r, include=FALSE}
+ggpairs(retail_data,
+        columns = c( 'Sales','Temperature', 'Fuel_Price', 'CPI', 'Unemployment', 'Size'),
+        title = "",
+        upper = list(continuous="cor",
+                     binwidth=1),
+        lower=list(continuous="smooth",
+                   binwidth=1),
+        switch = "y",
+        axisLabels="none")+
+  ggtitle("Distibution of the variables and pair correlations")
+```
+
+* Let us group Sales by Store and Date since these Continuous_variables refer to a Store for the week. This means we will lose the 'Dept' level variation in Sales. We will consider only the total of all Depts for a Day which is the total Sales for that Store on that Date(week).
+  - Temperature: Unique Temperature value affects at least 1 store and up to 5 stores on a given week
+  - Fuel_Price: Fuel Price affects at least 1 Store and up to 16 Stores on a given day.
+  - CPI: CPI affects at least 1 Store and up to 11 Stores on a given day. 
+  - Unemployment: Unemployment affects at least 1 Store and up to 6 Stores on a given day.
+```{r, include=FALSE}
+#retail_data%>%group_by(Date,Temperature)%>%summarise(nStore=n_distinct(Store))%>%arrange(desc(nStore))
+
+#retail_data%>%group_by(Date,Fuel_Price)%>%summarise(nStore=n_distinct(Store))%>%arrange(desc(nStore))
+
+#retail_data%>%group_by(Date,CPI)%>%summarise(nStore=n_distinct(Store))%>%arrange(desc(nStore))
+
+#retail_data%>%group_by(Date,Unemployment)%>%summarise(nStore=n_distinct(Store))%>%arrange(desc(nStore))
+```
+
+```{r, include=FALSE}
+retail_data%>%filter(Date=='2010-02-05' & Store==1)%>%head(1)
+```
+
+```{r, include=FALSE}
+retail_data%>%group_by(Date,Store)%>%summarise(dSales=sum(Sales),mean(Temperature),mean(Fuel_Price),mean(CPI), mean(Unemployment))
+```
+
+* Check pair correlations of the grouped data
+```{r, warning=FALSE, message=FALSE}
+a<-retail_data%>%group_by(Date,Store)%>%summarise(dSales=sum(Sales),mean(Temperature),mean(Fuel_Price),mean(CPI), mean(Unemployment),mean(Size))
+
+ggpairs(a,
+        columns = c( 'dSales','mean(Temperature)', 'mean(Fuel_Price)', 'mean(CPI)', 'mean(Unemployment)','mean(Size)'),
+        title = "",
+        upper = list(continuous="cor",
+                     binwidth=1),
+        lower=list(continuous="smooth",
+                   binwidth=1),
+        switch = "y",
+        axisLabels="none")+
+  ggtitle("Distibution of the variables and pair correlations")
+```
+
+* The correlation between Sales and the other Continuous_variables gets better after grouping:
+  - Sales-Temp  Ungrouped -0.002    Grouped -0.064
+  - Sales-FP    Ungrouped -0.000    Grouped 0.009
+  - Sales-CPI   Ungrouped -0.021    Grouped-0.073
+  - Sales-UE    Ungrouped -0.026    Grouped-0.106
+  - Sales-Size  Ungrouped  0.244    Grouped 0.810
+
+* There is a strong positive correlation of 'Sales' with the 'Size' of the stores.This means that the greater the size of the stores, the greater is the sales.
+For the other variables however, the correlation is poor.
+
+
+#### Linear Regression-Categorical_variables
+* Let us check 'Categorical_variables' such as 'Store', 'Holiday', 'Month' and 'Type' after grouping by the Date and Store. 
+  - Correlation plot for categorical_variables are difficult to interpret. So let us plug into 
+  the linear model to judge which of these are relevant.
+```{r, include=FALSE}
+retail_data$Holiday<-factor(retail_data$Holiday)
+retail_data$Store<-factor(retail_data$Store)
+retail_data$Type<-factor(retail_data$Type)
+```
+```{r, include=FALSE}
+cat_group<-retail_data%>%group_by(Date,Store,Holiday,Type, Month)%>%summarise(dSales=sum(Sales))
+cat_group
+```
+* Use linear model to check if the categorical variables are salient
+  - In linear model remember that with more independant variables R square 'R2' will increase but actually may not be significant. So pay attention to adjusted R2 and check when it begins to drop.
+
+* Adjusted R squares for 'Categorical_variables':
+  - Holiday 0.12%
+  - Type 36.43%
+  - Type*Holiday 36.56%
+  - Store 91.68%
+  - Store+Holiday+Type 91.82%
+  - Holiday*Store 91.83%
+  - Store + Month 93.57%
+  - Store+Holiday+Type+Month 93.58%
+  - Store+Month+Type+(Holiday*Store) 93.6%
+  - Store+Month+(Holiday*Store) 93.6%
+- Certain stores have more sales influenced by the fact that it is a holiday?
+- We cannot reject null hypothesis for Store 6. But other Stores have statistically significant p-values.
+- The p-values for 'Month' is also statistically significant. But for 'Holiday' the p-values are insignificant (large). Still, the adjusted R2 increases to  93.6% by including 'Month' and 'Holiday' along with 'Store'.
+
+```{r, include=FALSE}
+#linear_model<-lm(dSales ~ Store, data=cat_group)
+#linear_model<-lm(dSales ~ Holiday, data=cat_group)
+#linear_model<-lm(dSales ~ Store*Holiday, data=cat_group)
+#linear_model<-lm(dSales ~ Type, data=cat_group)
+#linear_model<-lm(dSales ~ Type*Holiday, data=cat_group)
+#linear_model<-lm(dSales ~ Store + Holiday + Type, data=cat_group)
+#linear_model<-lm(dSales ~Store + Holiday + Type +Month, data=cat_group)
+linear_model<-lm(dSales ~Store  + Month , data=cat_group)
+
+summary(linear_model)
+```
+
+```{r, include=FALSE}
+cont_group<-retail_data%>%group_by(Date,Store)%>%summarise(dSales=sum(Sales),Temp=mean(Temperature),FP=mean(Fuel_Price),CPI=mean(CPI),UE= mean(Unemployment),Size=mean(Size))
+head(cont_group)
+```
+
+#### Linear Regression-Continuous_variables
+* Let us check 'Categorical_variables' such as 'Temp', 'FP', 'CPI', 'UE', and 'Size' after grouping by the Date and Store. 
+* Adjusted R squares for 'Continuous_variables':
+  - Temp+FP+CPI+UE 2.37%
+  - Size 65.68%
+  - Size + FP 65.68%
+  - Size+Temp 65.69% 
+  - Size+UE 65.79%
+  - Size+CPI 66.09%
+  - Size+CPI+Temp 66.14%
+  - Size+CPI+UE 66.41%
+  - Size+CPI+UE+FP 66.42%
+  - Size+CPI+UE+Temp 66.51%
+  - Size+CPI+UE+Temp+FP 66.55%
+
+* The p-values are statistically significant (<0.05) for all the variables: Size,CPI,UE,Temp,FP.
+```{r, include=FALSE}
+#linear_model<-lm(dSales ~ Temp+FP+CPI+UE, data=cont_group)
+#linear_model<-lm(dSales ~ Size, data=cont_group)
+#linear_model<-lm(dSales ~ Temp+FP+CPI+UE+Size, data=cont_group)
+linear_model<-lm(dSales ~ Size+CPI+UE+Temp+FP, data=cont_group)
+summary(linear_model)
+```
+
+#### Linear Regression-Promotions and other combinations
+* These Promotion columns are unique because they contain a numeric magnitude (amount of         discount), so they behave as a continuous variable. But since they also contain missing values, they can be used as a binary factors: 'with promotion' or 'without promotion. For this analysis we are only going to use the 'Promotions' columns as Continuous (numeric).
+
+```{r, include=FALSE}
+#Promos<-retail_data%>%group_by(Date,Store,Promotion1,Promotion2,Promotion3,Promotion4,Promotion5)%>%summarise(dSales=sum(Sales))
+Promos<-retail_data%>%group_by(Date,Store,Total_Prom)%>%summarise(dSales=sum(Sales))
+#Promos
+#Promos%>%filter(Date=="2012-02-03") #Check if promotion values contain the correct values
+```
+
+* Regression using the 'Promotions' values only.
+  - With only 'Promotions' columns individually the adjusted R sq is 11.3%. The columns behave as continuous variables here.
+  - Considered as total promotions,which is the sum of the individual promotions for a row, the adjusted R sq is 8.3%
+  - The p-values for all the individual Promotions are statistically significant except for Promotion4. For this there is a 42.7% chance that the values are due to randomness.
+```{r, include=F}
+#prom_model<-lm(dSales ~ Promotion1+Promotion2+Promotion3+Promotion4+Promotion5, data=Promos)
+prom_model<-lm(dSales ~ Total_Prom, data=Promos)
+summary(prom_model)
+```
+
+```{r, include=FALSE}
+class(Promos$Promotion1)
+```
+
+```{r, include=FALSE}
+grouped_retail<-retail_data%>%group_by(Date,Store,Holiday,Type, Month,Promotion1,Promotion2,Promotion3,Promotion4,Promotion5)%>%summarise(dSales=sum(Sales), Temp=mean(Temperature),FP=mean(Fuel_Price),CPI=mean(CPI),UE= mean(Unemployment),Size=mean(Size))
+
+grouped_retail
+```
+
+* Use Promotion values in combination with some other variable to see if model performance improves:
+* Adjusted R2. ('BCat' is best of categoricals and 'BCon' is best of continuous.)
+  - Promos 11.3%
+  - Promos*Holiday :13.96% ; Promos + Holiday 11.68%
+  - Promos*Type 42.07% ; Promos + Type 42.18%
+  - Promos*Size 56.09% ; Promos + Size 56.19%
+  - Promos*Store 88.76% ; Promos + Store 87.74%
+  - Store*Promos + (best combination of categorical variables) 93.14%
+    - Best categoricals: Store+Month+(Holiday*Store) 93.6%
+    - BCat+Prom1 93.68
+    - BCat+Prom3 94.07
+    - BCat+Prom5 93.67
+    - BCat +Promotion1*Promotion3 94.12%
+    
+  - Store*Promos + (best combination of continuous variables) 89.37%
+    - Best continuous: Size+CPI+UE+Temp+FP 66.55%
+    - BCon + BCat 93.7%
+    - BCon + BCat + Prom3 94.09%
+    - BCon + BCat + Prom1*Prom3 94.14%
+    - BCon + BCat + Prom3*Prom5 94.15%
+    
+  
+```{r, include=FALSE}
+linear_model<-lm(dSales ~Store+Month+(Holiday*Store)+Size+CPI+UE+Temp+FP+Promotion3*Promotion5, data=grouped_retail)
+
+#linear_model<-lm(dSales ~Store+Month+(Holiday*Store)+Promotion1*Promotion3, data=grouped_retail)
+
+#linear_model<-lm(dSales ~Store+Month+(Holiday*Store)+Promotion3, data=grouped_retail)
+summary(linear_model)
+```
+
+
+## Conclusion
+
+* As we have seen above, there are various models which behave differently. The models which have the best R square values explain most of the variance. But this sometimes comes at the cost of low p-value for the variables.
+  - The model with the highest adjusted R square contains: Store + Month + (Holiday * Store) + Size + CPI + UE + Temp + FP + (Promotion3 * Promotion5) which explains 94.15% of the variance in Sales. However the p-values for many of the variables are statistically insignificant. So this model may not be the best option.
+  - The model with 'Store' number and 'Month' predictors, offers the best p-values and has an adjusted R square of 93.57%. This means that the 'Month' and which 'Store' explains the Sales of each Store the best. 
+  - Size appears to be the best predictor for success at a particular Store and explains 65.68% of the variance in Store Sales data. If we add the other continuous variables: Size + CPI + UE + Temp + FP then we add an additional 1% of explained variance for 66.55%. All these are parameters are statistically significant with low p-values. 
+    - So we can infer that Size influences the Sales of a individual Store the most. And based on which Store and month, we can predict the volume of Sales.
+
+* Top performances from entire data set:
+    - The top 6 Stores are: 20,4,14,13,2 and 10
+    - The top 5 Depts are: 92,95,38,72,90
+    - The top Dates are Nov 25th,26th and Dec 23rd,24th
+    
